@@ -29,12 +29,20 @@ const imgStyle = {
   objectFit: 'contain',
 };
 
-function PreviewModal({ open, onClose, original, processed }) {
+// --- MODIFIED ---
+// Add originalTitle and processedTitle to the props
+function PreviewModal({ 
+  open, 
+  onClose, 
+  original, 
+  processed,
+  originalTitle = "Original", // Add default value
+  processedTitle = "Processed" // Add default value
+}) {
   
   const handleDownload = () => {
-    // This creates a temporary link to download the processed image blob
     const link = document.createElement('a');
-    link.href = processed; // 'processed' is a blob URL
+    link.href = processed;
     link.setAttribute('download', 'aidit-processed.png');
     document.body.appendChild(link);
     link.click();
@@ -49,13 +57,15 @@ function PreviewModal({ open, onClose, original, processed }) {
         </Typography>
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
-            <Typography variant="h6">Original</Typography>
+            {/* --- MODIFIED --- */}
+            <Typography variant="h6">{originalTitle}</Typography>
             <Box sx={imageContainerStyle}>
               <img src={original} alt="Original" style={imgStyle} />
             </Box>
           </Grid>
           <Grid item xs={12} md={6}>
-            <Typography variant="h6">Background Removed</Typography>
+            {/* --- MODIFIED --- */}
+            <Typography variant="h6">{processedTitle}</Typography>
             <Box sx={imageContainerStyle}>
               <img src={processed} alt="Processed" style={imgStyle} />
             </Box>
