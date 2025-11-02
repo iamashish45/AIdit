@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { Container, Typography, Box, Tabs, Tab } from '@mui/material';
-import { PhotoFilter, AutoAwesome } from '@mui/icons-material';
+import { PhotoFilter, AutoAwesome, Edit } from '@mui/icons-material'; // NEW: Added Edit icon
 
-// Import both of our tools
+// Import all three of our tools
 import BackgroundTool from './features/backgroundRemover/BackgroundTool';
-import EnhancerTool from './features/imageEnhancer/EnhancerTool'; // NEW
+import EnhancerTool from './features/imageEnhancer/EnhancerTool';
+import EditorTool from './features/editor/EditorTool'; // NEW
 
-// Helper component for Tab Panels
+// Helper component for Tab Panels (no changes)
 function TabPanel(props) {
   const { children, value, index, ...other } = props;
   return (
@@ -18,7 +19,7 @@ function TabPanel(props) {
       {...other}
     >
       {value === index && (
-        <Box sx={{ pt: 3 }}>
+        <Box sx={{ pt: 3, width: '100%' }}>
           {children}
         </Box>
       )}
@@ -34,7 +35,7 @@ function App() {
   };
 
   return (
-    <Container maxWidth="lg">
+    <Container maxWidth="xl"> {/* Changed to 'xl' for more editor space */}
       <Box 
         sx={{
           my: 4,
@@ -58,6 +59,7 @@ function App() {
           >
             <Tab label="Background Editor" icon={<PhotoFilter />} index={0} />
             <Tab label="Image Enhancer" icon={<AutoAwesome />} index={1} />
+            <Tab label="Canvas Editor" icon={<Edit />} index={2} /> {/* NEW TAB */}
           </Tabs>
         </Box>
 
@@ -68,6 +70,10 @@ function App() {
         
         <TabPanel value={currentTab} index={1}>
           <EnhancerTool />
+        </TabPanel>
+        
+        <TabPanel value={currentTab} index={2}>
+          <EditorTool /> {/* NEW PANEL */}
         </TabPanel>
         
       </Box>
