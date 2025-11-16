@@ -1,142 +1,211 @@
 // src/features/editor/EditorSidebar.jsx
-import React, { useEffect, useState } from 'react';
-import { Box, Paper, Typography, Button, Divider, Slider, TextField, IconButton, Stack } from '@mui/material';
-import { UploadFile, FormatBold, FormatItalic, FormatAlignLeft, FormatAlignCenter, FormatAlignRight } from '@mui/icons-material';
+import React, { useRef } from 'react';
+import {
+  Box,
+  Button,
+  Slider,
+  TextField,
+  IconButton,
+  ToggleButton,
+  ToggleButtonGroup,
+  Typography,
+} from '@mui/material';
+import UndoIcon from '@mui/icons-material/Undo';
+import RedoIcon from '@mui/icons-material/Redo';
+import FormatBoldIcon from '@mui/icons-material/FormatBold';
+import FormatItalicIcon from '@mui/icons-material/FormatItalic';
+import FormatAlignLeftIcon from '@mui/icons-material/FormatAlignLeft';
+import FormatAlignCenterIcon from '@mui/icons-material/FormatAlignCenter';
+import FormatAlignRightIcon from '@mui/icons-material/FormatAlignRight';
 
-const FilterSlider = ({ label, value, onChange, disabled }) => {
-  const [val, setVal] = useState(value ?? 50);
-  useEffect(() => { setVal(value ?? 50); }, [value]);
-  const handleChange = (e, newVal) => {
-    setVal(newVal);
-    if (typeof onChange === 'function') onChange(newVal);
+export default function EditorSidebar(props) {
+  const {
+    onImageUpload,
+    onBrightnessChange,
+    onContrastChange,
+    textInput,
+    setTextInput,
+    fontSize,
+    setFontSize,
+    fontColor,
+    setFontColor,
+    isBold,
+    setIsBold,
+    isItalic,
+    setIsItalic,
+    textAlign,
+    setTextAlign,
+    addText,
+    updateText,
+    toggleInlineEdit,
+    addElement,
+    onUndo,
+    onRedo,
+    canUndo,
+  } = props;
+
+  const imageInputRef = useRef(null);
+
+  const triggerImageInput = () => { imageInputRef.current?.click(); };
+
+  const onImageFileSelected = (ev) => {
+    const f = ev.target.files && ev.target.files[0];
+    if (!f) return;
+    onImageUpload?.(f);
+    ev.target.value = '';
   };
-  return (
-    <Box sx={{ mb: 2 }}>
-      <Typography gutterBottom>{label}</Typography>
-      <Slider value={val} min={0} max={100} step={1} onChange={handleChange} valueLabelDisplay="auto" disabled={disabled} />
-    </Box>
-  );
-};
 
-export default function EditorSidebar({
-  onImageUpload,
-  selectedObject,
-  onBrightnessChange,
-  onContrastChange,
-
-  // text tool props
-  textInput,
-  setTextInput,
-  fontSize,
-  setFontSize,
-  fontColor,
-  setFontColor,
-  isBold,
-  setIsBold,
-  isItalic,
-  setIsItalic,
-  textAlign,
-  setTextAlign,
-  addText,
-  updateText,
-  toggleInlineEdit,
-}) {
-  useEffect(() => {
-    // nothing to do; props drive UI
-  }, [selectedObject]);
-
-  const handleFileChange = (e) => {
-    const file = e.target.files?.[0];
-    if (file && typeof onImageUpload === 'function') onImageUpload(file);
-    e.target.value = null;
+  const handleAddShape = (type) => {
+    addElement?.(type);
   };
 
-  const isTextSelected = !!(selectedObject && (selectedObject.type === 'textbox' || selectedObject.type === 'i-text' || selectedObject.type === 'text'));
+  // The sliders are neutral at 50, range 0..100
+  // onChange -> live updates (we expect the parent to use CSS preview for instant feedback)
+  // onChangeCommitted -> final apply (parent may run heavier Fabric filter work)
+  const handleBrightnessChange = (e, value) => {
+    if (typeof value !== 'number') return;
+    onBrightnessChange?.(value);
+  };
+  const handleContrastChange = (e, value) => {
+    if (typeof value !== 'number') return;
+    onContrastChange?.(value);
+  };
 
   return (
-    <Paper elevation={3} sx={{ width: '100%', height: '80vh', p: 2, overflowY: 'auto' }}>
-      <Typography variant="h6" gutterBottom>Controls</Typography>
+    <Box sx={{ p: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
+      <Typography variant="h6">Editor</Typography>
 
-      <Box sx={{ mb: 2 }}>
-        <Button variant="contained" component="label" startIcon={<UploadFile />} fullWidth>
-          Upload Base Image
-          <input type="file" hidden accept="image/png, image/jpeg" onChange={handleFileChange} />
+      {/* Image upload (base) */}
+      <input
+        ref={imageInputRef}
+        onChange={onImageFileSelected}
+        accept="image/*"
+        type="file"
+        style={{ display: 'none' }}
+      />
+      <Button variant="contained" onClick={triggerImageInput} fullWidth>
+        Upload Background Image
+      </Button>
+
+      {/* Brightness */}
+      <Box>
+        <Typography variant="subtitle2">Brightness</Typography>
+        <Slider
+          min={0}
+          max={100}
+          defaultValue={50}
+          onChange={handleBrightnessChange}
+          onChangeCommitted={(_, v) => { if (typeof v === 'number') onBrightnessChange?.(v); }}
+          aria-label="brightness"
+        />
+      </Box>
+
+      {/* Contrast */}
+      <Box>
+        <Typography variant="subtitle2">Contrast</Typography>
+        <Slider
+          min={0}
+          max={100}
+          defaultValue={50}
+          onChange={handleContrastChange}
+          onChangeCommitted={(_, v) => { if (typeof v === 'number') onContrastChange?.(v); }}
+          aria-label="contrast"
+        />
+      </Box>
+
+      {/* Text tool */}
+      <Typography variant="subtitle2">Text</Typography>
+      <TextField
+        size="small"
+        placeholder="Text"
+        value={textInput}
+        onChange={(e) => setTextInput?.(e.target.value)}
+        onBlur={() => updateText?.(textInput)}
+      />
+      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+        <TextField
+          type="number"
+          size="small"
+          label="Font size"
+          value={fontSize}
+          onChange={(e) => setFontSize?.(Math.max(6, Number(e.target.value) || 12))}
+          sx={{ width: 100 }}
+        />
+        <input
+          type="color"
+          value={fontColor}
+          onChange={(e) => setFontColor?.(e.target.value)}
+          style={{ width: 40, height: 32, border: 'none', padding: 0, background: 'none' }}
+        />
+        <ToggleButtonGroup
+          value={isBold ? 'bold' : isItalic ? 'italic' : null}
+          size="small"
+        >
+          <ToggleButton
+            value="bold"
+            selected={isBold}
+            onChange={() => setIsBold?.(!isBold)}
+            title="Bold"
+          >
+            <FormatBoldIcon />
+          </ToggleButton>
+          <ToggleButton
+            value="italic"
+            selected={isItalic}
+            onChange={() => setIsItalic?.(!isItalic)}
+            title="Italic"
+          >
+            <FormatItalicIcon />
+          </ToggleButton>
+        </ToggleButtonGroup>
+      </Box>
+
+      <Box>
+        <ToggleButtonGroup
+          exclusive
+          value={textAlign}
+          size="small"
+          aria-label="text alignment"
+        >
+          <ToggleButton value="left" onClick={() => setTextAlign?.('left')} title="Left">
+            <FormatAlignLeftIcon />
+          </ToggleButton>
+          <ToggleButton value="center" onClick={() => setTextAlign?.('center')} title="Center">
+            <FormatAlignCenterIcon />
+          </ToggleButton>
+          <ToggleButton value="right" onClick={() => setTextAlign?.('right')} title="Right">
+            <FormatAlignRightIcon />
+          </ToggleButton>
+        </ToggleButtonGroup>
+      </Box>
+
+      <Box sx={{ display: 'flex', gap: 1 }}>
+        <Button variant="contained" onClick={() => addText?.(textInput)} fullWidth>
+          Add Text
+        </Button>
+        <Button variant="outlined" onClick={() => toggleInlineEdit?.()} fullWidth>
+          Edit
         </Button>
       </Box>
 
-      <Divider />
-
-      <Box sx={{ mt: 2 }}>
-        <Typography variant="h6" gutterBottom>Basic Edits</Typography>
-        <Box sx={{ p: 1 }}>
-          <FilterSlider label="Brightness" value={50} onChange={onBrightnessChange} />
-          <FilterSlider label="Contrast" value={50} onChange={onContrastChange} />
-        </Box>
+      {/* Elements (shapes) */}
+      <Typography variant="subtitle2">Elements</Typography>
+      <Box sx={{ display: 'flex', gap: 1 }}>
+        <Button variant="outlined" onClick={() => handleAddShape('rect')}>Rect</Button>
+        <Button variant="outlined" onClick={() => handleAddShape('circle')}>Circle</Button>
+        <Button variant="outlined" onClick={() => handleAddShape('triangle')}>Triangle</Button>
+        <Button variant="outlined" onClick={() => handleAddShape('line')}>Line</Button>
       </Box>
 
-      <Divider sx={{ my: 2 }} />
-
-      <Box sx={{ mt: 2 }}>
-        <Typography variant="h6" gutterBottom>Text</Typography>
-
-        <TextField
-          label={isTextSelected ? 'Edit selected text' : 'New text'}
-          value={textInput ?? ''}
-          onChange={(e) => {
-            const v = e.target.value;
-            setTextInput(v);
-            if (isTextSelected && typeof updateText === 'function') updateText(v);
-          }}
-          multiline
-          minRows={1}
-          maxRows={6}
-          fullWidth
-        />
-
-        <Stack direction="row" spacing={1} sx={{ mt: 1, mb: 1 }} alignItems="center">
-          <TextField
-            label="Font size"
-            type="number"
-            value={fontSize ?? 40}
-            onChange={(e) => { const v = Math.max(8, Number(e.target.value)); setFontSize(v); }}
-            size="small"
-            sx={{ width: 110 }}
-          />
-          <TextField
-            label="Color"
-            type="color"
-            value={fontColor ?? '#000000'}
-            onChange={(e) => setFontColor(e.target.value)}
-            size="small"
-            sx={{ width: 72, p: 0 }}
-            inputProps={{ style: { padding: 2 } }}
-          />
-          <IconButton aria-label="bold" color={isBold ? 'primary' : 'default'} onClick={() => setIsBold(!isBold)}>
-            <FormatBold />
-          </IconButton>
-          <IconButton aria-label="italic" color={isItalic ? 'primary' : 'default'} onClick={() => setIsItalic(!isItalic)}>
-            <FormatItalic />
-          </IconButton>
-          <IconButton aria-label="left" color={textAlign === 'left' ? 'primary' : 'default'} onClick={() => setTextAlign('left')}>
-            <FormatAlignLeft />
-          </IconButton>
-          <IconButton aria-label="center" color={textAlign === 'center' ? 'primary' : 'default'} onClick={() => setTextAlign('center')}>
-            <FormatAlignCenter />
-          </IconButton>
-          <IconButton aria-label="right" color={textAlign === 'right' ? 'primary' : 'default'} onClick={() => setTextAlign('right')}>
-            <FormatAlignRight />
-          </IconButton>
-        </Stack>
-
-        <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-          <Button variant="contained" onClick={() => addText && addText()} fullWidth>
-            Add Text
-          </Button>
-          <Button variant="outlined" onClick={() => toggleInlineEdit && toggleInlineEdit()} disabled={!isTextSelected} fullWidth>
-            Edit Selected
-          </Button>
-        </Stack>
+      {/* Undo / Redo */}
+      <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-start', mt: 1 }}>
+        <IconButton onClick={() => onUndo?.()} title="Undo" disabled={!canUndo?.()}>
+          <UndoIcon />
+        </IconButton>
+        <IconButton onClick={() => onRedo?.()} title="Redo">
+          <RedoIcon />
+        </IconButton>
       </Box>
-    </Paper>
+    </Box>
   );
 }
