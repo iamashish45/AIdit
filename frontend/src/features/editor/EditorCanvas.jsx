@@ -1,4 +1,3 @@
-// src/features/editor/EditorCanvas.jsx
 import React, { useRef, useLayoutEffect } from 'react';
 import * as fabric from 'fabric';
 import { Box } from '@mui/material';
@@ -14,7 +13,6 @@ export default function EditorCanvas({ onCanvasReady }) {
     const canvasEl = canvasElRef.current;
     if (!container || !canvasEl) return;
 
-    // Fill container
     canvasEl.style.width = '100%';
     canvasEl.style.height = '100%';
     canvasEl.style.display = 'block';
@@ -33,7 +31,6 @@ export default function EditorCanvas({ onCanvasReady }) {
       renderOnAddRemove: false,
     });
 
-    // set domain canvas pixel dimensions to CSS dims (avoid DPR blowup)
     try {
       const el = canvas.lowerCanvasEl || canvas.upperCanvasEl || canvas.getElement?.();
       if (el) {
