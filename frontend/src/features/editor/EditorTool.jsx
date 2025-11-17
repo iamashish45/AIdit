@@ -1,4 +1,4 @@
-// src/features/editor/EditorTool.jsx
+// This file is the same as the last one, with one new prop passed to EditorSidebar
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Box } from '@mui/material';
 import * as fabric from 'fabric';
@@ -8,40 +8,30 @@ import EditorSidebar from './EditorSidebar';
 import EditorCanvas from './EditorCanvas';
 
 export default function EditorTool() {
+  // ... (all your existing states: canvasInstance, selectedObject, etc.)
   const [canvasInstance, setCanvasInstance] = useState(null);
   const [selectedObject, setSelectedObject] = useState(null);
   const selectedObjectRef = useRef(null);
-
-  // CSS filter slider state
   const [cssBrightness, setCssBrightness] = useState(50);
   const [cssContrast, setCssContrast] = useState(50);
-
-  // Text tool state
   const [textInput, setTextInput] = useState('');
   const [fontSize, setFontSize] = useState(40);
   const [fontColor, setFontColor] = useState('#000000');
   const [isBold, setIsBold] = useState(false);
   const [isItalic, setIsItalic] = useState(false);
   const [textAlign, setTextAlign] = useState('center');
-
-  // Undo / redo stacks
   const undoStackRef = useRef([]);
   const redoStackRef = useRef([]);
-
-  // RAF refs for throttled rendering/filters
   const rafRef = useRef(null);
   const cssFilterRafRef = useRef(null);
   const fabricFilterRafRef = useRef(null);
 
+  // ... (all your existing functions: onCanvasReady, safeRender, applyCssFilters, etc.)
   useEffect(() => { selectedObjectRef.current = selectedObject; }, [selectedObject]);
 
-  // -----------------------------
-  // Canvas ready
-  // -----------------------------
   const onCanvasReady = useCallback((canvas) => {
     setCanvasInstance(canvas);
     if (!canvas) return;
-
     if (typeof canvas.on === 'function') {
       canvas.on('selection:created', (e) => setSelectedObject(e.target));
       canvas.on('selection:updated', (e) => setSelectedObject(e.target));
@@ -62,12 +52,8 @@ export default function EditorTool() {
         }
       });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // -----------------------------
-  // safeRender (RAF-throttled)
-  // -----------------------------
   const safeRender = useCallback(() => {
     if (!canvasInstance) return;
     if (rafRef.current) return;
@@ -85,9 +71,6 @@ export default function EditorTool() {
     };
   }, []);
 
-  // -----------------------------
-  // CSS filters (preview)
-  // -----------------------------
   const applyCssFiltersToCanvas = useCallback((brightnessSlider, contrastSlider) => {
     try {
       const el = document.getElementById('editor-canvas') || ((canvasInstance && (canvasInstance.lowerCanvasEl || canvasInstance.getElement?.())));
@@ -103,9 +86,6 @@ export default function EditorTool() {
     applyCssFiltersToCanvas(cssBrightness, cssContrast);
   }, [canvasInstance, cssBrightness, cssContrast, applyCssFiltersToCanvas]);
 
-  // -----------------------------
-  // Downscale helper (non-blocking)
-  // -----------------------------
   const downscaleFileToDataUrl = useCallback(async (file, maxSide = 1600) => {
     try {
       const blob = file;
@@ -200,9 +180,6 @@ export default function EditorTool() {
     }
   }, []);
 
-  // -----------------------------
-  // Fabric filters application (Brightness / Contrast)
-  // -----------------------------
   const applyFabricFiltersToSelectedImage = useCallback((brightnessSlider = cssBrightness, contrastSlider = cssContrast) => {
     if (!canvasInstance) return;
     if (fabricFilterRafRef.current) return;
@@ -240,9 +217,6 @@ export default function EditorTool() {
     });
   }, [canvasInstance, cssBrightness, cssContrast, safeRender]);
 
-  // -----------------------------
-  // Image upload (base/background)
-  // -----------------------------
   const handleImageUpload = useCallback(async (file) => {
     if (!file || !canvasInstance) return;
     try {
@@ -294,13 +268,8 @@ export default function EditorTool() {
     }
   }, [canvasInstance, downscaleFileToDataUrl, applyCssFiltersToCanvas, cssBrightness, cssContrast, applyFabricFiltersToSelectedImage, safeRender]);
 
-  // -----------------------------
-  // Robust helper: fetch proxied/external URL and create fabric.Image from blob
-  // -----------------------------
   const loadImageViaFetchForFabric = useCallback(async (url, timeoutMs = 20000) => {
     if (!url) throw new Error('url required');
-
-    // If url is not http(s), let fabric handle it directly (data:, blob:)
     if (!/^https?:\/\//i.test(url)) {
       return new Promise((resolve, reject) => {
         fabric.Image.fromURL(url, (fabricImg) => {
@@ -309,34 +278,21 @@ export default function EditorTool() {
         }, { crossOrigin: 'anonymous' });
       });
     }
-
-    // --- THIS IS THE FIX ---
-    // This function is now more robust for loading blobs.
     const blobToFabricImage = async (blob) => {
       const blobUrl = URL.createObjectURL(blob);
       try {
-        // 1. Create a standard HTML Image element
         const htmlImage = new Image();
         htmlImage.src = blobUrl;
-        
-        // 2. Wait for the image to load from the blob URL
         await new Promise((resolve, reject) => {
           htmlImage.onload = () => resolve();
           htmlImage.onerror = () => reject(new Error('HTMLImage failed to load blob URL'));
         });
-
-        // 3. Pass the *loaded* HTML element to the fabric.Image constructor
         const fabricImg = new fabric.Image(htmlImage);
         return fabricImg;
-
       } finally {
-        // 4. Clean up the blob URL to prevent memory leaks
         try { URL.revokeObjectURL(blobUrl); } catch (_) {}
       }
     };
-    // --- END OF FIX ---
-
-    // Try fetch first
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -358,12 +314,9 @@ export default function EditorTool() {
     } catch (fetchErr) {
       clearTimeout(id);
       console.warn('fetch failed for', url, fetchErr && (fetchErr.message || fetchErr));
-
-      // Try axios fallback (XHR may behave differently)
       try {
         const axiosResp = await axios.get(url, { responseType: 'blob', timeout: timeoutMs });
         const ct2 = ((axiosResp.headers && axiosResp.headers['content-type']) || '').toLowerCase();
-        
         if (!ct2.startsWith('image/')) {
           let preview = '';
           try {
@@ -380,15 +333,10 @@ export default function EditorTool() {
     }
   }, []);
 
-  // -----------------------------
-  // Elements: shapes & remote image (safe fetch)
-  // -----------------------------
   const addElement = useCallback(async (type, payload = {}) => {
     if (!canvasInstance) return;
     const cW = canvasInstance.getWidth();
     const cH = canvasInstance.getHeight();
-
-    // Shapes
     if (type === 'rect') {
       const r = new fabric.Rect({ left: cW / 2, top: cH / 2, originX: 'center', originY: 'center', width: payload.width || 200, height: payload.height || 120, fill: payload.fill || '#ffffff', stroke: payload.stroke || '#000000', strokeWidth: payload.strokeWidth || 2, selectable: true });
       r._userAdded = true; canvasInstance.add(r); canvasInstance.setActiveObject(r); r.setCoords(); canvasInstance.renderAll(); setSelectedObject(r); undoStackRef.current.push({ type: 'add', obj: r }); redoStackRef.current = []; return;
@@ -405,8 +353,6 @@ export default function EditorTool() {
       const line = new fabric.Line([0, 0, payload.length || 200, 0], { left: cW / 2, top: cH / 2, originX: 'center', originY: 'center', stroke: payload.stroke || '#000000', strokeWidth: payload.strokeWidth || 3, selectable: true });
       line._userAdded = true; canvasInstance.add(line); canvasInstance.setActiveObject(line); line.setCoords(); canvasInstance.renderAll(); setSelectedObject(line); undoStackRef.current.push({ type: 'add', obj: line }); redoStackRef.current = []; return;
     }
-
-    // Remote image by URL (stock image / proxy)
     if (payload.url) {
       try {
         const imgObj = await loadImageViaFetchForFabric(payload.url);
@@ -431,9 +377,6 @@ export default function EditorTool() {
     }
   }, [canvasInstance, loadImageViaFetchForFabric, cssBrightness, cssContrast, applyFabricFiltersToSelectedImage, safeRender]);
 
-  // -----------------------------
-  // Element upload (file -> add element)
-  // -----------------------------
   const handleElementUpload = useCallback(async (file) => {
     if (!file || !canvasInstance) return;
     const cW = canvasInstance.getWidth();
@@ -537,9 +480,6 @@ export default function EditorTool() {
     }
   }, [canvasInstance, downscaleFileToDataUrl, safeRender]);
 
-  // -----------------------------
-  // Undo / Redo
-  // -----------------------------
   const undo = useCallback(() => {
     const stack = undoStackRef.current;
     if (!stack || stack.length === 0) return;
@@ -576,9 +516,6 @@ export default function EditorTool() {
     }
   }, [canvasInstance]);
 
-  // -----------------------------
-  // Slider handlers
-  // -----------------------------
   const handleBrightnessChange = useCallback((sliderValue) => {
     setCssBrightness(sliderValue);
     applyCssFiltersToCanvas(sliderValue, cssContrast);
@@ -591,9 +528,6 @@ export default function EditorTool() {
     applyFabricFiltersToSelectedImage(cssBrightness, sliderValue);
   }, [applyCssFiltersToCanvas, cssBrightness, applyFabricFiltersToSelectedImage]);
 
-  // -----------------------------
-  // Selection sync
-  // -----------------------------
   useEffect(() => {
     if (!canvasInstance) return undefined;
     const onSel = (e) => setSelectedObject(e?.target ?? null);
@@ -606,9 +540,6 @@ export default function EditorTool() {
     };
   }, [canvasInstance]);
 
-  // -----------------------------
-  // Text utils
-  // -----------------------------
   useEffect(() => {
     try { updateSelectedTextStyle({ fill: fontColor }); } catch (_) {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -683,9 +614,6 @@ export default function EditorTool() {
     } catch (err) { /* ignore */ }
   }, [canvasInstance]);
 
-  // -----------------------------
-  // AI background generate handler (axios -> blob)
-  // -----------------------------
   const handleGenerateBackground = useCallback(async (prompt, onStarted, onFinished) => {
     if (!prompt) return;
     onStarted?.();
@@ -708,9 +636,6 @@ export default function EditorTool() {
     }
   }, [handleImageUpload]);
 
-  // -----------------------------
-  // Helpers & UI props
-  // -----------------------------
   const canUndo = () => (undoStackRef.current && undoStackRef.current.length > 0);
 
   return (
