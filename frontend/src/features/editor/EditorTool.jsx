@@ -2,16 +2,17 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Box } from '@mui/material';
 import * as fabric from 'fabric';
+import axios from 'axios';
 
 import EditorSidebar from './EditorSidebar';
 import EditorCanvas from './EditorCanvas';
 
-export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
+export default function EditorTool() {
   const [canvasInstance, setCanvasInstance] = useState(null);
   const [selectedObject, setSelectedObject] = useState(null);
   const selectedObjectRef = useRef(null);
 
-  // CSS filter slider state (0-100)
+  // CSS filter slider state
   const [cssBrightness, setCssBrightness] = useState(50);
   const [cssContrast, setCssContrast] = useState(50);
 
@@ -27,16 +28,7 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
   const undoStackRef = useRef([]);
   const redoStackRef = useRef([]);
 
-  // Pixabay state
-  const [pixabayResults, setPixabayResults] = useState([]);
-  const [pixabayLoading, setPixabayLoading] = useState(false);
-  const [pixabayError, setPixabayError] = useState(null);
-  const pixabayAbortRef = useRef(null);
-
-  // Use prop -> env -> hardcoded fallback (your provided key)
-  const pixabayKey = propPixabayKey || process.env.REACT_APP_PIXABAY_KEY || '53270247-aef2cd84e1e877abd1580c8ea';
-
-  // RAF refs for throttling
+  // RAF refs for throttled rendering/filters
   const rafRef = useRef(null);
   const cssFilterRafRef = useRef(null);
   const fabricFilterRafRef = useRef(null);
@@ -44,7 +36,7 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
   useEffect(() => { selectedObjectRef.current = selectedObject; }, [selectedObject]);
 
   // -----------------------------
-  // Canvas ready callback & listeners
+  // Canvas ready
   // -----------------------------
   const onCanvasReady = useCallback((canvas) => {
     setCanvasInstance(canvas);
@@ -61,7 +53,6 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
           try { t.enterEditing(); t.selectAll(); } catch (_) {}
         }
       });
-
       canvas.on('object:added', (e) => {
         const obj = e.target;
         if (!obj) return;
@@ -74,15 +65,9 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (rafRef.current) { window.cancelAnimationFrame(rafRef.current); rafRef.current = null; }
-      if (cssFilterRafRef.current) { window.cancelAnimationFrame(cssFilterRafRef.current); cssFilterRafRef.current = null; }
-      if (fabricFilterRafRef.current) { window.cancelAnimationFrame(fabricFilterRafRef.current); fabricFilterRafRef.current = null; }
-      if (pixabayAbortRef.current) { try { pixabayAbortRef.current.abort(); } catch (_) {} pixabayAbortRef.current = null; }
-    };
-  }, []);
-
+  // -----------------------------
+  // safeRender (RAF-throttled)
+  // -----------------------------
   const safeRender = useCallback(() => {
     if (!canvasInstance) return;
     if (rafRef.current) return;
@@ -92,19 +77,25 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
     });
   }, [canvasInstance]);
 
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) { window.cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+      if (cssFilterRafRef.current) { window.cancelAnimationFrame(cssFilterRafRef.current); cssFilterRafRef.current = null; }
+      if (fabricFilterRafRef.current) { window.cancelAnimationFrame(fabricFilterRafRef.current); fabricFilterRafRef.current = null; }
+    };
+  }, []);
+
   // -----------------------------
-  // CSS preview filters (fast preview)
+  // CSS filters (preview)
   // -----------------------------
   const applyCssFiltersToCanvas = useCallback((brightnessSlider, contrastSlider) => {
     try {
-      const el =
-        document.getElementById('editor-canvas') ||
-        (canvasInstance && (canvasInstance.lowerCanvasEl || canvasInstance.getElement?.()));
+      const el = document.getElementById('editor-canvas') || ((canvasInstance && (canvasInstance.lowerCanvasEl || canvasInstance.getElement?.())));
       if (!el) return;
-      const b = (brightnessSlider || 50) / 50;
-      const c = (contrastSlider || 50) / 50;
+      const b = brightnessSlider / 50;
+      const c = contrastSlider / 50;
       el.style.filter = `brightness(${b}) contrast(${c})`;
-    } catch (_) { /* ignore */ }
+    } catch (e) { /* ignore */ }
   }, [canvasInstance]);
 
   useEffect(() => {
@@ -113,7 +104,7 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
   }, [canvasInstance, cssBrightness, cssContrast, applyCssFiltersToCanvas]);
 
   // -----------------------------
-  // Downscale helper (uses createImageBitmap/OffscreenCanvas when available)
+  // Downscale helper (non-blocking)
   // -----------------------------
   const downscaleFileToDataUrl = useCallback(async (file, maxSide = 1600) => {
     try {
@@ -145,7 +136,7 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
               r.onerror = () => res(null);
               r.readAsDataURL(outBlob);
             });
-          } catch (err) { /* fallback */ }
+          } catch (err) { /* fallback below */ }
         }
         return await new Promise((resolve) => {
           setTimeout(() => {
@@ -155,7 +146,8 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
               c.height = ch;
               const ctx = c.getContext('2d');
               ctx.drawImage(bitmap, 0, 0, iw, ih, 0, 0, cw, ch);
-              resolve(c.toDataURL('image/png', 0.9));
+              const dataUrl = c.toDataURL('image/png', 0.9);
+              resolve(dataUrl);
             } catch (err) {
               const fr = new FileReader();
               fr.onload = (ev) => resolve(ev.target?.result);
@@ -209,7 +201,7 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
   }, []);
 
   // -----------------------------
-  // Fabric filters (apply as Fabric Image filters)
+  // Fabric filters application (Brightness / Contrast)
   // -----------------------------
   const applyFabricFiltersToSelectedImage = useCallback((brightnessSlider = cssBrightness, contrastSlider = cssContrast) => {
     if (!canvasInstance) return;
@@ -228,10 +220,8 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
           }
         }
         if (!target) return;
-
         const fBrightness = (brightnessSlider / 50) - 1;
         const fContrast = (contrastSlider / 50) - 1;
-
         const ImgFilters = fabric.Image && fabric.Image.filters ? fabric.Image.filters : null;
         const newFilters = [];
         if (ImgFilters && typeof ImgFilters.Brightness === 'function') {
@@ -240,20 +230,18 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
         if (ImgFilters && typeof ImgFilters.Contrast === 'function') {
           try { newFilters.push(new ImgFilters.Contrast({ contrast: fContrast })); } catch (_) {}
         }
-
         if (newFilters.length === 0) return;
-
         try {
           target.filters = newFilters;
           if (typeof target.applyFilters === 'function') target.applyFilters();
-        } catch (_) {}
+        } catch (err) { /* non-fatal */ }
         try { canvasInstance.requestRenderAll?.(); } catch (_) { safeRender(); }
-      } catch (_) {}
+      } catch (err) { /* swallow */ }
     });
   }, [canvasInstance, cssBrightness, cssContrast, safeRender]);
 
   // -----------------------------
-  // Background image upload (uses downscaling helper)
+  // Image upload (base/background)
   // -----------------------------
   const handleImageUpload = useCallback(async (file) => {
     if (!file || !canvasInstance) return;
@@ -270,17 +258,13 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
           const nativeH = img.naturalHeight || fImg.height || 1;
           fImg._origW = nativeW;
           fImg._origH = nativeH;
-
           try { fImg.set({ selectable: true, opacity: 1, visible: true, evented: true }); } catch (_) {}
           try { canvasInstance.clear(); } catch (_) {}
           try { canvasInstance.set('backgroundColor', '#f0f0f0'); } catch (_) { canvasInstance.backgroundColor = '#f0f0f0'; }
           try { canvasInstance.calcOffset?.(); } catch (_) {}
-
           const cW = canvasInstance.getWidth();
           const cH = canvasInstance.getHeight();
-
           fImg.set({ originX: 'center', originY: 'center' });
-
           if (typeof fImg.scaleToWidth === 'function') {
             fImg.scaleToWidth(cW);
             const scaledH = (fImg.height || nativeH) * (fImg.scaleY || 1);
@@ -289,18 +273,13 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
             const scale = Math.min(cW / nativeW, cH / nativeH);
             fImg.set({ scaleX: scale, scaleY: scale });
           }
-
-          fImg.set({ left: cW / 2, top: cH / 2 });
-          fImg._userAdded = true;
-
+          fImg.set({ left: cW / 2, top: cH / 2, _userAdded: true });
           try { canvasInstance.add(fImg); } catch (err) { try { canvasInstance._objects = canvasInstance._objects || []; canvasInstance._objects.push(fImg); } catch (_) {} }
-
           try { canvasInstance.centerObject(fImg); } catch (_) {}
           try { fImg.setCoords(); } catch (_) {}
           try { canvasInstance.setActiveObject(fImg); } catch (_) {}
           try { canvasInstance.calcOffset?.(); } catch (_) {}
           safeRender();
-
           setSelectedObject(fImg);
           applyCssFiltersToCanvas(cssBrightness, cssContrast);
           applyFabricFiltersToSelectedImage(cssBrightness, cssContrast);
@@ -308,7 +287,7 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
           console.error('fabric.Image load error', err);
         }
       };
-      img.onerror = () => {};
+      img.onerror = () => { /* ignore */ };
       img.src = dataUrl;
     } catch (err) {
       console.error('handleImageUpload error', err);
@@ -316,14 +295,100 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
   }, [canvasInstance, downscaleFileToDataUrl, applyCssFiltersToCanvas, cssBrightness, cssContrast, applyFabricFiltersToSelectedImage, safeRender]);
 
   // -----------------------------
-  // Elements: shapes & image-url (fetch-first)
+  // Robust helper: fetch proxied/external URL and create fabric.Image from blob
   // -----------------------------
-  const addElement = useCallback((type, payload = {}) => {
+  const loadImageViaFetchForFabric = useCallback(async (url, timeoutMs = 20000) => {
+    if (!url) throw new Error('url required');
+
+    // If url is not http(s), let fabric handle it directly (data:, blob:)
+    if (!/^https?:\/\//i.test(url)) {
+      return new Promise((resolve, reject) => {
+        fabric.Image.fromURL(url, (fabricImg) => {
+          if (!fabricImg) return reject(new Error('fabric failed to create image from non-http url'));
+          resolve(fabricImg);
+        }, { crossOrigin: 'anonymous' });
+      });
+    }
+
+    // --- THIS IS THE FIX ---
+    // This function is now more robust for loading blobs.
+    const blobToFabricImage = async (blob) => {
+      const blobUrl = URL.createObjectURL(blob);
+      try {
+        // 1. Create a standard HTML Image element
+        const htmlImage = new Image();
+        htmlImage.src = blobUrl;
+        
+        // 2. Wait for the image to load from the blob URL
+        await new Promise((resolve, reject) => {
+          htmlImage.onload = () => resolve();
+          htmlImage.onerror = () => reject(new Error('HTMLImage failed to load blob URL'));
+        });
+
+        // 3. Pass the *loaded* HTML element to the fabric.Image constructor
+        const fabricImg = new fabric.Image(htmlImage);
+        return fabricImg;
+
+      } finally {
+        // 4. Clean up the blob URL to prevent memory leaks
+        try { URL.revokeObjectURL(blobUrl); } catch (_) {}
+      }
+    };
+    // --- END OF FIX ---
+
+    // Try fetch first
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const resp = await fetch(url, { method: 'GET', signal: controller.signal, cache: 'no-store' });
+      clearTimeout(id);
+      if (!resp.ok) {
+        let preview = '';
+        try { preview = (await resp.text()).slice(0, 200); } catch (_) { preview = ''; }
+        throw new Error(`fetch returned ${resp.status} ${resp.statusText} preview:${preview}`);
+      }
+      const ct = (resp.headers.get('content-type') || '').toLowerCase();
+      if (!ct.startsWith('image/')) {
+        let preview = '';
+        try { preview = (await resp.text()).slice(0, 200); } catch (_) { preview = ''; }
+        throw new Error(`fetch returned non-image content-type: ${ct} preview:${preview}`);
+      }
+      const blob = await resp.blob();
+      return await blobToFabricImage(blob);
+    } catch (fetchErr) {
+      clearTimeout(id);
+      console.warn('fetch failed for', url, fetchErr && (fetchErr.message || fetchErr));
+
+      // Try axios fallback (XHR may behave differently)
+      try {
+        const axiosResp = await axios.get(url, { responseType: 'blob', timeout: timeoutMs });
+        const ct2 = ((axiosResp.headers && axiosResp.headers['content-type']) || '').toLowerCase();
+        
+        if (!ct2.startsWith('image/')) {
+          let preview = '';
+          try {
+            preview = await new Response(axiosResp.data).text();
+            preview = preview.slice(0, 200);
+          } catch (_) { preview = ''; }
+          throw new Error(`axios returned non-image content-type: ${ct2} preview:${preview}`);
+        }
+        return await blobToFabricImage(axiosResp.data);
+      } catch (axErr) {
+        console.error('Both fetch and axios failed for', url, axErr && (axErr.message || axErr));
+        throw new Error(`Failed to fetch image: ${axErr && axErr.message ? axErr.message : String(axErr)}`);
+      }
+    }
+  }, []);
+
+  // -----------------------------
+  // Elements: shapes & remote image (safe fetch)
+  // -----------------------------
+  const addElement = useCallback(async (type, payload = {}) => {
     if (!canvasInstance) return;
     const cW = canvasInstance.getWidth();
     const cH = canvasInstance.getHeight();
 
-    // shapes
+    // Shapes
     if (type === 'rect') {
       const r = new fabric.Rect({ left: cW / 2, top: cH / 2, originX: 'center', originY: 'center', width: payload.width || 200, height: payload.height || 120, fill: payload.fill || '#ffffff', stroke: payload.stroke || '#000000', strokeWidth: payload.strokeWidth || 2, selectable: true });
       r._userAdded = true; canvasInstance.add(r); canvasInstance.setActiveObject(r); r.setCoords(); canvasInstance.renderAll(); setSelectedObject(r); undoStackRef.current.push({ type: 'add', obj: r }); redoStackRef.current = []; return;
@@ -341,79 +406,136 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
       line._userAdded = true; canvasInstance.add(line); canvasInstance.setActiveObject(line); line.setCoords(); canvasInstance.renderAll(); setSelectedObject(line); undoStackRef.current.push({ type: 'add', obj: line }); redoStackRef.current = []; return;
     }
 
-    // payload.url: fetch first (more robust with proxies)
+    // Remote image by URL (stock image / proxy)
     if (payload.url) {
-      const urlToLoad = payload.url;
-      setPixabayError(null);
-
-      // fetch image as blob first
-      (async () => {
-        try {
-          // try to fetch with default CORS mode. If you use a proxy, ensure it returns image bytes and CORS headers.
-          const resp = await fetch(urlToLoad, { mode: 'cors' });
-          if (!resp.ok) {
-            const statusText = `${resp.status} ${resp.statusText}`;
-            console.error('Pixabay image fetch failed', urlToLoad, statusText);
-            setPixabayError(`Image fetch failed: ${statusText}`);
-            return;
-          }
-
-          const contentType = resp.headers.get('Content-Type') || '';
-          if (!contentType.startsWith('image/')) {
-            console.error('Pixabay proxy returned non-image content-type:', contentType, urlToLoad);
-            setPixabayError('Image proxy returned non-image content.');
-            return;
-          }
-
-          const blob = await resp.blob();
-          if (!blob || blob.size === 0) {
-            console.error('Fetched blob is empty for', urlToLoad);
-            setPixabayError('Fetched image is empty.');
-            return;
-          }
-
-          const objectUrl = URL.createObjectURL(blob);
-          // create an Image element so we can pass a fully loaded element into fabric.Image constructor
-          const imageEl = new Image();
-          imageEl.crossOrigin = 'anonymous';
-          imageEl.onload = () => {
-            try {
-              const fImg = new fabric.Image(imageEl);
-              fImg.set({ left: cW / 2, top: cH / 2, originX: 'center', originY: 'center', selectable: true });
-              const maxDim = Math.min(cW, cH) * 0.35;
-              const scale = Math.min(1, maxDim / Math.max(fImg.width || 1, fImg.height || 1));
-              fImg.scaleX = (fImg.scaleX || 1) * scale;
-              fImg.scaleY = (fImg.scaleY || 1) * scale;
-              fImg._userAdded = true;
-              canvasInstance.add(fImg);
-              canvasInstance.setActiveObject(fImg);
-              fImg.setCoords();
-              canvasInstance.renderAll?.();
-              undoStackRef.current.push({ type: 'add', obj: fImg });
-              redoStackRef.current = [];
-              // apply filters if any
-              try { applyFabricFiltersToSelectedImage(cssBrightness, cssContrast); } catch (_) {}
-            } catch (err) {
-              console.error('fabric fallback image creation error', err);
-              setPixabayError('Failed to create fabric image.');
-            } finally {
-              try { URL.revokeObjectURL(objectUrl); } catch (_) {}
-            }
-          };
-          imageEl.onerror = (e) => {
-            console.error('Image element failed to load objectUrl', e);
-            setPixabayError('Failed to load image element.');
-            try { URL.revokeObjectURL(objectUrl); } catch (_) {}
-          };
-          // start the load from blob URL
-          imageEl.src = objectUrl;
-        } catch (err) {
-          console.error('Error fetching pixabay image', err);
-          setPixabayError(err?.message || String(err));
-        }
-      })();
+      try {
+        const imgObj = await loadImageViaFetchForFabric(payload.url);
+        if (!imgObj) { console.warn('failed to create image from url'); return; }
+        imgObj.set({ left: cW / 2, top: cH / 2, originX: 'center', originY: 'center', selectable: true });
+        const maxDim = Math.min(cW, cH) * 0.35;
+        const scale = Math.min(1, maxDim / Math.max(imgObj.width || 1, imgObj.height || 1));
+        imgObj.scaleX = (imgObj.scaleX || 1) * scale;
+        imgObj.scaleY = (imgObj.scaleY || 1) * scale;
+        imgObj._userAdded = true;
+        canvasInstance.add(imgObj);
+        canvasInstance.setActiveObject(imgObj);
+        imgObj.setCoords();
+        try { canvasInstance.renderAll(); } catch (_) { safeRender(); }
+        setSelectedObject(imgObj);
+        undoStackRef.current.push({ type: 'add', obj: imgObj });
+        redoStackRef.current = [];
+        applyFabricFiltersToSelectedImage(cssBrightness, cssContrast);
+      } catch (err) {
+        console.warn('addElement(payload.url) failed:', err && (err.message || err));
+      }
     }
-  }, [canvasInstance, cssBrightness, cssContrast, applyFabricFiltersToSelectedImage]);
+  }, [canvasInstance, loadImageViaFetchForFabric, cssBrightness, cssContrast, applyFabricFiltersToSelectedImage, safeRender]);
+
+  // -----------------------------
+  // Element upload (file -> add element)
+  // -----------------------------
+  const handleElementUpload = useCallback(async (file) => {
+    if (!file || !canvasInstance) return;
+    const cW = canvasInstance.getWidth();
+    const cH = canvasInstance.getHeight();
+    const isSvg = file.type === 'image/svg+xml' || (file.name && file.name.toLowerCase().endsWith('.svg'));
+    if (isSvg) {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const svgText = ev.target?.result;
+        if (!svgText) return;
+        try {
+          fabric.loadSVGFromString(svgText, (objects, options) => {
+            let objs = objects;
+            if (!objs) objs = [];
+            else if (!Array.isArray(objs)) objs = [objs];
+            let group = null;
+            try { group = fabric.util.groupSVGElements(objs, options); } catch (_) { group = null; }
+            if (!group || typeof group.set !== 'function') {
+              try { group = new fabric.Group(objs, options || {}); } catch (_) { group = null; }
+            }
+            if (!group) {
+              const url = 'data:image/svg+xml;utf8,' + encodeURIComponent(svgText);
+              fabric.Image.fromURL(url, (img) => {
+                if (!img) return;
+                img.set({ left: cW / 2, top: cH / 2, originX: 'center', originY: 'center', selectable: true, _userAdded: true });
+                const maxDim = Math.min(cW, cH) * 0.35;
+                const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
+                img.scaleX = (img.scaleX || 1) * scale;
+                img.scaleY = (img.scaleY || 1) * scale;
+                canvasInstance.add(img);
+                canvasInstance.setActiveObject(img);
+                img.setCoords();
+                safeRender();
+                setSelectedObject(img);
+                undoStackRef.current.push({ type: 'add', obj: img });
+                redoStackRef.current = [];
+              }, { crossOrigin: 'anonymous' });
+              return;
+            }
+            try { group.set({ left: cW / 2, top: cH / 2, originX: 'center', originY: 'center', selectable: true }); } catch (_) {}
+            let bbox = { width: group.width || 1, height: group.height || 1 };
+            try { const r = group.getBoundingRect(true); if (r && r.width && r.height) bbox = { width: r.width, height: r.height }; } catch (_) {}
+            const maxDim = Math.min(cW, cH) * 0.35;
+            const scale = Math.min(1, maxDim / Math.max(bbox.width || 1, bbox.height || 1));
+            try { group.scaleX = (group.scaleX || 1) * scale; group.scaleY = (group.scaleY || 1) * scale; } catch (_) {}
+            group._userAdded = true;
+            try { canvasInstance.add(group); } catch (errAdd) { console.warn('add group failed', errAdd); }
+            try { canvasInstance.setActiveObject(group); } catch (_) {}
+            try { group.setCoords(); } catch (_) {}
+            safeRender();
+            setSelectedObject(group);
+            undoStackRef.current.push({ type: 'add', obj: group });
+            redoStackRef.current = [];
+          });
+        } catch (err) {
+          try {
+            const url = 'data:image/svg+xml;utf8,' + encodeURIComponent(svgText);
+            fabric.Image.fromURL(url, (img) => {
+              if (!img) return;
+              img.set({ left: cW / 2, top: cH / 2, originX: 'center', originY: 'center', selectable: true, _userAdded: true });
+              const maxDim = Math.min(cW, cH) * 0.35;
+              const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
+              img.scaleX = (img.scaleX || 1) * scale;
+              img.scaleY = (img.scaleY || 1) * scale;
+              canvasInstance.add(img);
+              canvasInstance.setActiveObject(img);
+              img.setCoords();
+              safeRender();
+              setSelectedObject(img);
+              undoStackRef.current.push({ type: 'add', obj: img });
+              redoStackRef.current = [];
+            }, { crossOrigin: 'anonymous' });
+          } catch (fbErr) { console.warn('svg fallback failed', fbErr); }
+        }
+      };
+      reader.onerror = () => {};
+      reader.readAsText(file);
+      return;
+    }
+
+    try {
+      const dataUrl = await downscaleFileToDataUrl(file, 1000);
+      if (!dataUrl) return;
+      fabric.Image.fromURL(dataUrl, (img) => {
+        if (!img) return;
+        img.set({ left: cW / 2, top: cH / 2, originX: 'center', originY: 'center', selectable: true, _userAdded: true });
+        const maxDim = Math.min(cW, cH) * 0.35;
+        const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
+        img.scaleX = (img.scaleX || 1) * scale;
+        img.scaleY = (img.scaleY || 1) * scale;
+        canvasInstance.add(img);
+        canvasInstance.setActiveObject(img);
+        img.setCoords();
+        safeRender();
+        setSelectedObject(img);
+        undoStackRef.current.push({ type: 'add', obj: img });
+        redoStackRef.current = [];
+      }, { crossOrigin: 'anonymous' });
+    } catch (err) {
+      console.warn('element image add failed', err);
+    }
+  }, [canvasInstance, downscaleFileToDataUrl, safeRender]);
 
   // -----------------------------
   // Undo / Redo
@@ -434,7 +556,7 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
         redoStackRef.current.push(action);
         try { canvasInstance && canvasInstance.renderAll(); } catch (_) {}
         setSelectedObject((prev) => (prev === action.obj ? null : prev));
-      } catch (err) { console.warn('undo failed', err); }
+      } catch (err) { /* ignore */ }
     }
   }, [canvasInstance]);
 
@@ -450,11 +572,13 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
         undoStackRef.current.push(action);
         try { canvasInstance && canvasInstance.renderAll(); } catch (_) {}
         setSelectedObject(obj);
-      } catch (err) { console.warn('redo failed', err); }
+      } catch (err) { /* ignore */ }
     }
   }, [canvasInstance]);
 
-  // slider handlers (update CSS preview + apply Fabric filters)
+  // -----------------------------
+  // Slider handlers
+  // -----------------------------
   const handleBrightnessChange = useCallback((sliderValue) => {
     setCssBrightness(sliderValue);
     applyCssFiltersToCanvas(sliderValue, cssContrast);
@@ -468,59 +592,28 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
   }, [applyCssFiltersToCanvas, cssBrightness, applyFabricFiltersToSelectedImage]);
 
   // -----------------------------
-  // PIXABAY: search function
+  // Selection sync
   // -----------------------------
-  const searchPixabay = useCallback(async (query, opts = {}) => {
-    if (!query || !pixabayKey) {
-      setPixabayResults([]);
-      setPixabayError(pixabayKey ? null : 'Missing Pixabay API key (set REACT_APP_PIXABAY_KEY or pass pixabayKey prop)');
-      return;
-    }
+  useEffect(() => {
+    if (!canvasInstance) return undefined;
+    const onSel = (e) => setSelectedObject(e?.target ?? null);
+    canvasInstance.on('selection:created', onSel);
+    canvasInstance.on('selection:updated', onSel);
+    canvasInstance.on('selection:cleared', () => setSelectedObject(null));
+    return () => {
+      try { canvasInstance.off('selection:created', onSel); } catch (_) {}
+      try { canvasInstance.off('selection:updated', onSel); } catch (_) {}
+    };
+  }, [canvasInstance]);
 
-    if (pixabayAbortRef.current) {
-      try { pixabayAbortRef.current.abort(); } catch (_) {}
-      pixabayAbortRef.current = null;
-    }
-    const ac = new AbortController();
-    pixabayAbortRef.current = ac;
+  // -----------------------------
+  // Text utils
+  // -----------------------------
+  useEffect(() => {
+    try { updateSelectedTextStyle({ fill: fontColor }); } catch (_) {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fontColor]);
 
-    setPixabayLoading(true);
-    setPixabayError(null);
-    setPixabayResults([]);
-
-    try {
-      const params = new URLSearchParams({
-        key: pixabayKey,
-        q: query,
-        image_type: opts.image_type || 'photo',
-        per_page: String(opts.per_page || 24),
-        safesearch: String(typeof opts.safesearch !== 'undefined' ? opts.safesearch : true),
-      });
-      const url = `https://pixabay.com/api/?${params.toString()}`;
-      const res = await fetch(url, { signal: ac.signal });
-      if (!res.ok) {
-        const txt = await res.text().catch(() => res.statusText || 'Unknown error');
-        throw new Error(`Pixabay fetch failed: ${res.status} ${txt}`);
-      }
-      const json = await res.json();
-      const hits = Array.isArray(json.hits) ? json.hits : [];
-      setPixabayResults(hits);
-    } catch (err) {
-      if (err && err.name === 'AbortError') { /* ignore aborted */ }
-      else setPixabayError(err?.message || String(err));
-    } finally {
-      setPixabayLoading(false);
-      pixabayAbortRef.current = null;
-    }
-  }, [pixabayKey]);
-
-  // click handler for sidebar thumbnails
-  const addImageFromUrl = useCallback((url) => {
-    if (!url) return;
-    addElement('image', { url });
-  }, [addElement]);
-
-  // Text helpers
   const addTextToCanvas = useCallback((text, options = {}) => {
     if (!canvasInstance) return;
     const cW = canvasInstance.getWidth();
@@ -542,6 +635,8 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
     try { canvasInstance.setActiveObject(tb); } catch (_) {}
     try { canvasInstance.renderAll(); } catch (_) {}
     setSelectedObject(tb);
+    undoStackRef.current.push({ type: 'add', obj: tb });
+    redoStackRef.current = [];
   }, [canvasInstance, fontSize, fontColor, isBold, isItalic, textAlign]);
 
   const updateSelectedText = useCallback((newText) => {
@@ -554,7 +649,7 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
       obj.setCoords?.();
       canvasInstance?.renderAll?.();
       setSelectedObject(obj);
-    } catch (err) { console.warn('updateSelectedText failed', err); }
+    } catch (err) { /* ignore */ }
   }, [canvasInstance]);
 
   const updateSelectedTextStyle = useCallback((updates = {}) => {
@@ -570,34 +665,54 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
       obj.setCoords?.();
       canvasInstance?.renderAll?.();
       setSelectedObject(obj);
-    } catch (err) { console.warn('updateSelectedTextStyle failed', err); }
+    } catch (err) { /* ignore */ }
   }, [canvasInstance]);
 
   const toggleInlineEdit = useCallback((obj) => {
     const target = obj || selectedObjectRef.current || (canvasInstance && canvasInstance.getActiveObject && canvasInstance.getActiveObject());
     if (!target) return;
     try {
-      if (target.isEditing) { target.exitEditing(); target.setCoords?.(); } else { target.enterEditing(); try { target.selectAll(); } catch (_) {} }
+      if (target.isEditing) {
+        target.exitEditing();
+        target.setCoords?.();
+      } else {
+        target.enterEditing();
+        try { target.selectAll(); } catch (_) {}
+      }
       canvasInstance?.renderAll?.();
     } catch (err) { /* ignore */ }
   }, [canvasInstance]);
 
-  // keep selection state in sync
-  useEffect(() => {
-    if (!canvasInstance) return undefined;
-    const onSel = (e) => setSelectedObject(e?.target ?? null);
-    canvasInstance.on('selection:created', onSel);
-    canvasInstance.on('selection:updated', onSel);
-    canvasInstance.on('selection:cleared', () => setSelectedObject(null));
-    return () => {
-      try { canvasInstance.off('selection:created', onSel); } catch (_) {}
-      try { canvasInstance.off('selection:updated', onSel); } catch (_) {}
-    };
-  }, [canvasInstance]);
+  // -----------------------------
+  // AI background generate handler (axios -> blob)
+  // -----------------------------
+  const handleGenerateBackground = useCallback(async (prompt, onStarted, onFinished) => {
+    if (!prompt) return;
+    onStarted?.();
+    try {
+      const formData = new FormData();
+      formData.append('prompt', prompt);
+      const response = await axios.post(
+        'http://127.0.0.1:8000/api/tools/generate-background',
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' }, responseType: 'blob' }
+      );
+      const imageBlob = response.data;
+      const imageFile = new File([imageBlob], 'generated-background.png', { type: 'image/png' });
+      await handleImageUpload(imageFile);
+    } catch (err) {
+      console.error('handleGenerateBackground error', err);
+      onFinished?.(err);
+    } finally {
+      onFinished?.();
+    }
+  }, [handleImageUpload]);
 
-  const canUndo = useCallback(() => (undoStackRef.current && undoStackRef.current.length > 0), []);
+  // -----------------------------
+  // Helpers & UI props
+  // -----------------------------
+  const canUndo = () => (undoStackRef.current && undoStackRef.current.length > 0);
 
-  // final render
   return (
     <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '320px 1fr' }, gap: 2, p: 1 }}>
       <Box>
@@ -606,12 +721,14 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
           selectedObject={selectedObject}
           onBrightnessChange={handleBrightnessChange}
           onContrastChange={handleContrastChange}
+
+          // text props & handlers
           textInput={textInput}
           setTextInput={(v) => { setTextInput(v); if (selectedObject && (selectedObject.type === 'textbox' || selectedObject.type === 'i-text' || selectedObject.type === 'text')) updateSelectedText(v); }}
           fontSize={fontSize}
           setFontSize={(v) => { setFontSize(v); updateSelectedTextStyle({ fontSize: v }); }}
           fontColor={fontColor}
-          setFontColor={(v) => { setFontColor(v); /* effect applies */ }}
+          setFontColor={(v) => { setFontColor(v); }}
           isBold={isBold}
           setIsBold={(v) => { setIsBold(v); updateSelectedTextStyle({ fontWeight: v ? 'bold' : 'normal' }); }}
           isItalic={isItalic}
@@ -621,15 +738,18 @@ export default function EditorTool({ pixabayKey: propPixabayKey } = {}) {
           addText={() => { addTextToCanvas(textInput, { fontSize, fill: fontColor, fontWeight: isBold ? 'bold' : 'normal', fontStyle: isItalic ? 'italic' : 'normal', textAlign }); }}
           updateText={(newText) => updateSelectedText(newText)}
           toggleInlineEdit={() => { toggleInlineEdit(); }}
+
+          // elements (shapes + remote stock via URL)
           addElement={addElement}
+          onElementUpload={handleElementUpload}
+
+          // AI generation
+          onGenerateBackground={handleGenerateBackground}
+
+          // undo/redo
           onUndo={undo}
           onRedo={redo}
           canUndo={canUndo}
-          pixabayResults={pixabayResults}
-          pixabayLoading={pixabayLoading}
-          pixabayError={pixabayError}
-          onSearchPixabay={searchPixabay}
-          onAddImageFromUrl={addImageFromUrl}
         />
       </Box>
 

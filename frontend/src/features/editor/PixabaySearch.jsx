@@ -4,7 +4,7 @@ import {
   Box, 
   TextField, 
   Button, 
-  Grid, 
+  // Removed Grid
   CircularProgress, 
   Typography, 
   Paper 
@@ -13,8 +13,6 @@ import {
 // Your API Key from the .env file
 const API_KEY = process.env.REACT_APP_PIXABAY_API_KEY;
 const PIXABAY_API_URL = 'https://pixabay.com/api/';
-
-// NEW: Define our backend proxy URL
 const PROXY_URL = 'http://127.0.0.1:8000/api/proxy/image';
 
 function PixabaySearch({ onImageSelect }) {
@@ -35,7 +33,6 @@ function PixabaySearch({ onImageSelect }) {
     setResults([]);
 
     try {
-      // This call is fine, it goes from our browser to Pixabay's API
       const response = await axios.get(PIXABAY_API_URL, {
         params: {
           key: API_KEY,
@@ -59,22 +56,10 @@ function PixabaySearch({ onImageSelect }) {
 
   const handleImageClick = (image) => {
     if (onImageSelect) {
-      // --- THIS IS THE ROBUST FIX ---
-      
-      // 1. Get the original image URL from Pixabay
-      const originalUrl = image.webformatURL; // Use webformatURL for speed
-      
-      // 2. We need to URL-encode it so it can be passed as a query parameter
+      const originalUrl = image.webformatURL;
       const encodedUrl = encodeURIComponent(originalUrl);
-
-      // 3. Build our *backend* proxy URL
       const urlToLoadInCanvas = `${PROXY_URL}?url=${encodedUrl}`;
-
-      // 4. Tell fabric.js to load the image from OUR backend
-      // Your EditorTool.jsx's addElement(type, { url }) will handle this
       onImageSelect('image', { url: urlToLoadInCanvas });
-      
-      // --- END OF FIX ---
     }
   };
 
@@ -116,28 +101,34 @@ function PixabaySearch({ onImageSelect }) {
           background: 'rgba(0,0,0,0.1)' 
         }}
       >
-        <Grid container spacing={1}>
+        {/* --- CSS GRID FIX --- */}
+        {/* Replaced <Grid container> with <Box display="grid"> */}
+        <Box sx={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)', // 3 columns
+          gap: 1
+        }}>
           {results.map((image) => (
-            <Grid item xs={4} key={image.id}>
-              <Box
-                component="img"
-                src={image.previewURL}
-                alt={image.tags}
-                sx={{
-                  width: '100%',
-                  height: 80,
-                  objectFit: 'cover',
-                  cursor: 'pointer',
-                  borderRadius: 1,
-                  '&:hover': {
-                    opacity: 0.7,
-                  }
-                }}
-                onClick={() => handleImageClick(image)}
-              />
-            </Grid>
+            <Box
+              key={image.id}
+              component="img"
+              src={image.previewURL}
+              alt={image.tags}
+              sx={{
+                width: '100%',
+                height: 80,
+                objectFit: 'cover',
+                cursor: 'pointer',
+                borderRadius: 1,
+                '&:hover': {
+                  opacity: 0.7,
+                }
+              }}
+              onClick={() => handleImageClick(image)}
+            />
           ))}
-        </Grid>
+        </Box>
+        {/* --- END FIX --- */}
       </Paper>
     </Box>
   );

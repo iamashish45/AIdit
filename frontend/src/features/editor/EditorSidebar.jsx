@@ -1,4 +1,5 @@
-import React, { useRef, useState } from 'react';
+// src/features/editor/EditorSidebar.jsx
+import React, { useRef, useState } from 'react'; // NEW: Import useState
 import {
   Box,
   Button,
@@ -8,7 +9,8 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Typography,
-  CircularProgress,
+  Divider, // NEW: Import Divider
+  CircularProgress // NEW: Import CircularProgress
 } from '@mui/material';
 import UndoIcon from '@mui/icons-material/Undo';
 import RedoIcon from '@mui/icons-material/Redo';
@@ -17,6 +19,10 @@ import FormatItalicIcon from '@mui/icons-material/FormatItalic';
 import FormatAlignLeftIcon from '@mui/icons-material/FormatAlignLeft';
 import FormatAlignCenterIcon from '@mui/icons-material/FormatAlignCenter';
 import FormatAlignRightIcon from '@mui/icons-material/FormatAlignRight';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'; // NEW: Import AI icon
+
+// NEW: Import Pixabay Component
+import PixabaySearch from './PixabaySearch'; 
 
 export default function EditorSidebar(props) {
   const {
@@ -39,18 +45,18 @@ export default function EditorSidebar(props) {
     updateText,
     toggleInlineEdit,
     addElement,
+    onGenerateBackground, // NEW: Get handler from props
     onUndo,
     onRedo,
     canUndo,
-    pixabayResults = [],
-    pixabayLoading = false,
-    pixabayError = null,
-    onSearchPixabay = null,
-    onAddImageFromUrl = null,
   } = props;
 
-  const [searchTerm, setSearchTerm] = useState('');
   const imageInputRef = useRef(null);
+
+  // NEW: State for generation
+  const [prompt, setPrompt] = useState('A beautiful sunny beach');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState('');
 
   const triggerImageInput = () => { imageInputRef.current?.click(); };
 
@@ -74,93 +80,196 @@ export default function EditorSidebar(props) {
     onContrastChange?.(value);
   };
 
-  const runSearch = () => {
-    if (!onSearchPixabay) return;
-    const q = (searchTerm || '').trim();
-    if (!q) return;
-    onSearchPixabay(q, { per_page: 24, image_type: 'photo', safesearch: true });
+  // NEW: Generate Button Handler
+  const handleGenerateClick = async () => {
+    setIsGenerating(true);
+    setGenerateError('');
+    await onGenerateBackground(
+      prompt, 
+      () => setIsGenerating(true), // onStarted
+      (err) => { // onFinished
+        setIsGenerating(false);
+        if(err) setGenerateError('Generation failed. Check console.');
+      }
+    );
   };
 
   return (
-    <Box sx={{ p: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
+    <Box sx={{ 
+      p: 1, 
+      display: 'flex', 
+      flexDirection: 'column', 
+      gap: 1.5, 
+      height: '80vh', 
+      overflowY: 'auto' 
+    }}>
       <Typography variant="h6">Editor</Typography>
 
-      {/* Pixabay search */}
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-        <TextField size="small" placeholder="Search Pixabay" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') runSearch(); }} sx={{ flex: 1 }} />
-        <Button variant="contained" onClick={runSearch} disabled={!onSearchPixabay}>Search</Button>
+      {/* Image upload (base) */}
+      <input
+        ref={imageInputRef}
+        onChange={onImageFileSelected}
+        accept="image/*"
+        type="file"
+        style={{ display: 'none' }}
+      />
+      <Button variant="contained" onClick={triggerImageInput} fullWidth>
+        Upload Background Image
+      </Button>
+
+      {/* --- NEW: AI Background Generation --- */}
+      <Box>
+        <Typography variant="subtitle2">AI Generate Background</Typography>
+        <TextField
+          fullWidth
+          size="small"
+          placeholder="Enter a prompt..."
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          disabled={isGenerating}
+        />
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={handleGenerateClick}
+          disabled={isGenerating}
+          startIcon={isGenerating ? <CircularProgress size={20} /> : <AutoFixHighIcon />}
+          fullWidth
+          sx={{ mt: 1 }}
+        >
+          {isGenerating ? 'Generating...' : 'Generate & Replace'}
+        </Button>
+        {generateError && <Typography color="error" variant="caption">{generateError}</Typography>}
       </Box>
 
-      {pixabayLoading ? <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}><CircularProgress size={24} /></Box> : null}
-      {pixabayError ? <Typography color="error" variant="caption">{String(pixabayError)}</Typography> : null}
-      {Array.isArray(pixabayResults) && pixabayResults.length > 0 && (
-        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 0.5, maxHeight: 160, overflow: 'auto', p: 0.5 }}>
-          {pixabayResults.map((hit) => {
-            const thumb = hit.previewURL || hit.webformatURL || hit.largeImageURL || hit.userImageURL;
-            const full = hit.largeImageURL || hit.webformatURL || hit.previewURL;
-            return (
-              <Box key={hit.id || thumb} sx={{ width: '100%', aspectRatio: '1/1', cursor: onAddImageFromUrl ? 'pointer' : 'default' }} onClick={() => { if (onAddImageFromUrl && full) onAddImageFromUrl(full); }}>
-                <img src={thumb} alt={hit.tags || 'pixabay'} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', borderRadius: 4 }} />
-              </Box>
-            );
-          })}
-        </Box>
-      )}
-
-      {/* Image upload (background) */}
-      <input ref={imageInputRef} onChange={onImageFileSelected} accept="image/*" type="file" style={{ display: 'none' }} />
-      <Button variant="contained" onClick={triggerImageInput} fullWidth>Upload Background Image</Button>
+      <Divider />
 
       {/* Brightness */}
       <Box>
         <Typography variant="subtitle2">Brightness</Typography>
-        <Slider min={0} max={100} defaultValue={50} onChange={handleBrightnessChange} onChangeCommitted={(_, v) => { if (typeof v === 'number') onBrightnessChange?.(v); }} aria-label="brightness" />
+        <Slider
+          min={0}
+          max={100}
+          defaultValue={50}
+          onChange={handleBrightnessChange}
+          onChangeCommitted={(_, v) => { if (typeof v === 'number') onBrightnessChange?.(v); }}
+          aria-label="brightness"
+        />
       </Box>
 
       {/* Contrast */}
       <Box>
         <Typography variant="subtitle2">Contrast</Typography>
-        <Slider min={0} max={100} defaultValue={50} onChange={handleContrastChange} onChangeCommitted={(_, v) => { if (typeof v === 'number') onContrastChange?.(v); }} aria-label="contrast" />
+        <Slider
+          min={0}
+          max={100}
+          defaultValue={50}
+          onChange={handleContrastChange}
+          onChangeCommitted={(_, v) => { if (typeof v === 'number') onContrastChange?.(v); }}
+          aria-label="contrast"
+        />
       </Box>
+
+      <Divider />
 
       {/* Text tool */}
       <Typography variant="subtitle2">Text</Typography>
-      <TextField size="small" placeholder="Text" value={textInput} onChange={(e) => setTextInput?.(e.target.value)} onBlur={() => updateText?.(textInput)} />
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-        <TextField type="number" size="small" label="Font size" value={fontSize} onChange={(e) => setFontSize?.(Math.max(6, Number(e.target.value) || 12))} sx={{ width: 100 }} />
-        <input type="color" value={fontColor} onChange={(e) => setFontColor?.(e.target.value)} style={{ width: 40, height: 32, border: 'none', padding: 0, background: 'none' }} />
-        <ToggleButtonGroup value={isBold ? 'bold' : isItalic ? 'italic' : null} size="small">
-          <ToggleButton value="bold" selected={isBold} onChange={() => setIsBold?.(!isBold)} title="Bold"><FormatBoldIcon /></ToggleButton>
-          <ToggleButton value="italic" selected={isItalic} onChange={() => setIsItalic?.(!isItalic)} title="Italic"><FormatItalicIcon /></ToggleButton>
+      <TextField
+        size="small"
+        placeholder="Text"
+        value={textInput}
+        onChange={(e) => setTextInput?.(e.target.value)}
+        onBlur={() => updateText?.(textInput)}
+      />
+      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+        <TextField
+          type="number"
+          size="small"
+          label="Font size"
+          value={fontSize}
+          onChange={(e) => setFontSize?.(Math.max(6, Number(e.target.value) || 12))}
+          sx={{ width: 100 }}
+        />
+        <input
+          type="color"
+          value={fontColor}
+          onChange={(e) => setFontColor?.(e.target.value)}
+          style={{ width: 40, height: 32, border: 'none', padding: 0, background: 'none' }}
+        />
+        <ToggleButtonGroup
+          value={isBold ? 'bold' : isItalic ? 'italic' : null}
+          size="small"
+        >
+          <ToggleButton
+            value="bold"
+            selected={isBold}
+            onChange={() => setIsBold?.(!isBold)}
+            title="Bold"
+          >
+            <FormatBoldIcon />
+          </ToggleButton>
+          <ToggleButton
+            value="italic"
+            selected={isItalic}
+            onChange={() => setIsItalic?.(!isItalic)}
+            title="Italic"
+          >
+            <FormatItalicIcon />
+          </ToggleButton>
+        </ToggleButtonGroup>
+      
+        <ToggleButtonGroup
+          exclusive
+          value={textAlign}
+          size="small"
+          aria-label="text alignment"
+        >
+          <ToggleButton value="left" onClick={() => setTextAlign?.('left')} title="Left">
+            <FormatAlignLeftIcon />
+          </ToggleButton>
+          <ToggleButton value="center" onClick={() => setTextAlign?.('center')} title="Center">
+            <FormatAlignCenterIcon />
+          </ToggleButton>
+          <ToggleButton value="right" onClick={() => setTextAlign?.('right')} title="Right">
+            <FormatAlignRightIcon />
+          </ToggleButton>
         </ToggleButtonGroup>
       </Box>
-
-      <Box>
-        <ToggleButtonGroup exclusive value={textAlign} size="small" aria-label="text alignment">
-          <ToggleButton value="left" onClick={() => setTextAlign?.('left')} title="Left"><FormatAlignLeftIcon /></ToggleButton>
-          <ToggleButton value="center" onClick={() => setTextAlign?.('center')} title="Center"><FormatAlignCenterIcon /></ToggleButton>
-          <ToggleButton value="right" onClick={() => setTextAlign?.('right')} title="Right"><FormatAlignRightIcon /></ToggleButton>
-        </ToggleButtonGroup>
-      </Box>
-
       <Box sx={{ display: 'flex', gap: 1 }}>
-        <Button variant="contained" onClick={() => addText?.(textInput)} fullWidth>Add Text</Button>
-        <Button variant="outlined" onClick={() => toggleInlineEdit?.()} fullWidth>Edit</Button>
+        <Button variant="contained" onClick={() => addText?.(textInput)} fullWidth>
+          Add Text
+        </Button>
+        <Button variant="outlined" onClick={() => toggleInlineEdit?.()} fullWidth>
+          Edit
+        </Button>
       </Box>
+
+      <Divider />
 
       {/* Elements (shapes) */}
-      <Typography variant="subtitle2">Elements</Typography>
-      <Box sx={{ display: 'flex', gap: 1 }}>
+      <Typography variant="subtitle2">Elements (Shapes)</Typography>
+      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
         <Button variant="outlined" onClick={() => handleAddShape('rect')}>Rect</Button>
         <Button variant="outlined" onClick={() => handleAddShape('circle')}>Circle</Button>
         <Button variant="outlined" onClick={() => handleAddShape('triangle')}>Triangle</Button>
         <Button variant="outlined" onClick={() => handleAddShape('line')}>Line</Button>
       </Box>
 
+      {/* --- NEW: Pixabay Stock Images --- */}
+      <Divider />
+      <Typography variant="subtitle2">Stock Images (Pixabay)</Typography>
+      <PixabaySearch onImageSelect={addElement} />
+      {/* This works because addElement is passed from props */}
+
       {/* Undo / Redo */}
+      <Divider />
       <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-start', mt: 1 }}>
-        <IconButton onClick={() => onUndo?.()} title="Undo" disabled={!canUndo?.()}><UndoIcon /></IconButton>
-        <IconButton onClick={() => onRedo?.()} title="Redo"><RedoIcon /></IconButton>
+        <IconButton onClick={() => onUndo?.()} title="Undo" disabled={!canUndo?.()}>
+          <UndoIcon />
+        </IconButton>
+        <IconButton onClick={() => onRedo?.()} title="Redo">
+          <RedoIcon />
+        </IconButton>
       </Box>
     </Box>
   );

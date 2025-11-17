@@ -33,10 +33,8 @@ export const processBackground = (imageFile, options = {}, onUploadProgress) => 
 };
 
 /**
- * NEW: Uploads an image and gets the enhanced/upscaled version.
- * @param {File} imageFile - The image file to process.
- * @param {function} onUploadProgress - Callback for upload progress.
- * @returns {Promise<Blob>} - A promise that resolves with the processed image blob.
+ * Uploads an image and gets the enhanced/upscaled version.
+ * (This function is from Phase 3, no changes needed)
  */
 export const enhanceImage = (imageFile, onUploadProgress) => {
   const formData = new FormData();
@@ -47,6 +45,23 @@ export const enhanceImage = (imageFile, onUploadProgress) => {
       'Content-Type': 'multipart/form-data'
     },
     onUploadProgress,
+    responseType: 'blob'
+  });
+};
+
+/**
+ * NEW: Generates a background from a text prompt.
+ * @param {string} prompt - The text prompt.
+ * @returns {Promise<Blob>} - A promise that resolves with the generated image blob.
+ */
+export const generateBackground = (prompt) => {
+  const formData = new FormData();
+  formData.append("prompt", prompt);
+  
+  return api.post('/api/tools/generate-background', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    },
     responseType: 'blob'
   });
 };
